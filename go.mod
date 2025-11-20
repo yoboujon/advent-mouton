@@ -1,4 +1,4 @@
-module main
+module adventmouton
 
 go 1.23.4
 
