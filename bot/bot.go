@@ -1,9 +1,12 @@
 package bot
 
 import (
-	"log"
+	"archive/zip"
+	"io"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -11,17 +14,18 @@ import (
 )
 
 var dg *discordgo.Session = nil
+var filelist []string
 
-func Setup(token string) {
+func Setup(data EnvData) {
 	var err error
-	dg, err = discordgo.New("Bot " + token)
+	dg, err = discordgo.New("Bot " + data.DiscordToken)
 	if err != nil {
-		log.Fatalf("Error creating Discord session: %v", err)
+		Logformat(ERROR, "Error creating Discord session: %v", err)
 	}
 	dg.AddHandler(onInteraction)
 	err = dg.Open()
 	if err != nil {
-		log.Fatalf("Cannot open Discord session: %v", err)
+		Logformat(ERROR, "Cannot open Discord session: %v", err)
 	}
 	_, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &discordgo.ApplicationCommand{
 		Name:        "advent",
@@ -35,7 +39,12 @@ func Setup(token string) {
 		},
 	})
 	if err != nil {
-		log.Fatalf("Cannot create slash command: %v", err)
+		Logformat(ERROR, "Cannot create slash command: %v", err)
+	}
+	Logformat(INFO, "Downloading %s, this may take some time...\n", data.MediaName)
+	filelist, err = downloadMedia(data.MediaURL, data.MediaName)
+	if err != nil {
+		Logformat(ERROR, "%s\n", err.Error())
 	}
 }
 
@@ -76,6 +85,88 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 }
 
+func downloadMedia(url string, zipName string) ([]string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	out, err := os.Create(zipName)
+	if err != nil {
+		return nil, err
+	}
+	_, err = io.Copy(out, resp.Body)
+	out.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	// unzipping files
+	result, err := unzip(zipName)
+	if err != nil {
+		return nil, err
+	}
+	os.Remove(zipName)
+
+	return result, nil
+}
+
+func unzip(zipPath string) ([]string, error) {
+	var fileMap []string
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+
+		// Creating "assets" folder
+		err = os.MkdirAll("assets", 0755)
+		path := filepath.Join("assets", filepath.Base(f.Name))
+		if err != nil {
+			rc.Close()
+			return nil, err
+		}
+
+		// Checking if in zip file is a gif/mp4/webp
+		isMedia := filepath.Ext(f.Name) == ".gif" || filepath.Ext(f.Name) == ".mp4" || filepath.Ext(f.Name) == ".webm"
+		if !isMedia {
+			rc.Close()
+			continue
+		}
+
+		// Creating file and extracting it.
+		print("\r")
+		Logformat(INFO, "Extracting '%s'...", f.Name)
+		outFile, err := os.Create(path)
+		if err != nil {
+			rc.Close()
+			return nil, err
+		}
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		fileMap = append(fileMap, path)
+	}
+	print("\n")
+
+	return fileMap, nil
+}
+
 func botLogic() {
+	now := time.Now()
+	if now.Month() != time.December {
+		return
+	}
 
 }
