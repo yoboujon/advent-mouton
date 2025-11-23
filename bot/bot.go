@@ -2,12 +2,15 @@ package bot
 
 import (
 	"archive/zip"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +20,11 @@ import (
 var dg *discordgo.Session = nil
 var filelist []string
 var bot_data EnvData
+
+type MediaMessage struct {
+	Timestamp time.Time
+	FileName  string
+}
 
 func Setup(data EnvData) {
 	var err error
@@ -80,7 +88,7 @@ func Loop() {
 			Logformat(INFO, "Stopping...\n")
 			return
 		default:
-			time.Sleep(time.Second)
+			time.Sleep(time.Duration(time.Second * 1))
 			botLogic()
 		}
 	}
@@ -202,7 +210,7 @@ func unzip(zipPath string) ([]string, error) {
 			return nil, err
 		}
 
-		fileMap = append(fileMap, path)
+		fileMap = append(fileMap, strings.TrimPrefix(path, "assets/"))
 	}
 	print("\n")
 
@@ -211,8 +219,114 @@ func unzip(zipPath string) ([]string, error) {
 
 func botLogic() {
 	now := time.Now()
-	if now.Month() != time.December {
-		return
+	for guildID, channelID := range guildChannels {
+		msg, err := getBotMediaMessages(dg, channelID, dg.State.User.ID)
+		if err != nil {
+			Logformat(WARNING, "Failed to get messages from server %s: %s", guildID, err.Error())
+			return
+		}
+
+		send := true
+		for _, element := range msg {
+			timestamp := element.Timestamp
+			if (timestamp.Day() == now.Day()) && (timestamp.Month() == now.Month()) && (timestamp.Year() == now.Year()) {
+				send = false
+			}
+		}
+		if send {
+			fileName, err := getRandomFile(msg)
+			if err != nil {
+				Logformat(WARNING, "Failed to send to server %s: %s", guildID, err.Error())
+			}
+			_, err = dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+				Files: []*discordgo.File{
+					{
+						Name:   fileName,
+						Reader: mustOpen("assets/" + fileName),
+					},
+				},
+			})
+			if err != nil {
+				Logformat(WARNING, "Failed to send to server %s: %s", guildID, err.Error())
+			}
+		}
+	}
+}
+
+func getBotMediaMessages(s *discordgo.Session, channelID, botID string) ([]MediaMessage, error) {
+	var mediaMessages []MediaMessage
+	beforeID := ""
+
+	for {
+		msgs, err := s.ChannelMessages(channelID, 100, beforeID, "", "")
+		if err != nil {
+			return nil, err
+		}
+		if len(msgs) == 0 {
+			break
+		}
+
+		for _, m := range msgs {
+			// If its our bot sending the message
+			if m.Author.ID != botID {
+				continue
+			}
+			// Checking there is a media
+			if len(m.Attachments) == 0 {
+				continue
+			}
+
+			for _, a := range m.Attachments {
+				mediaMessages = append(mediaMessages, MediaMessage{
+					Timestamp: m.Timestamp,
+					FileName:  a.Filename,
+				})
+			}
+		}
+
+		beforeID = msgs[len(msgs)-1].ID
 	}
 
+	return mediaMessages, nil
+}
+
+func getRandomFile(msg []MediaMessage) (string, error) {
+	sent := make(map[string]bool)
+	for _, f := range filelist {
+		f = filepath.Base(f)
+		sent[f] = false
+		for _, m := range msg {
+			if m.FileName == f {
+				sent[f] = true
+			}
+		}
+	}
+
+	// Checking if all media are already sent
+	allSent := true
+	for _, wasSent := range sent {
+		if !wasSent {
+			allSent = false
+			break
+		}
+	}
+	if allSent {
+		return "", errors.New("all media already sent")
+	}
+
+	// For loop to find a message that was not sent
+	for {
+		randomFile := filelist[rand.Intn(len(filelist))]
+		if !sent[filepath.Base(randomFile)] {
+			return randomFile, nil
+		}
+	}
+}
+
+func mustOpen(path string) *os.File {
+	f, err := os.Open(path)
+	if err != nil {
+		panic(err)
+	}
+	return f
 }
