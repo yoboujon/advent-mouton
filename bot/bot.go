@@ -2,6 +2,7 @@ package bot
 
 import (
 	"archive/zip"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -15,10 +16,12 @@ import (
 
 var dg *discordgo.Session = nil
 var filelist []string
+var bot_data EnvData
 
 func Setup(data EnvData) {
 	var err error
-	dg, err = discordgo.New("Bot " + data.DiscordToken)
+	bot_data = data
+	dg, err = discordgo.New("Bot " + bot_data.DiscordToken)
 	if err != nil {
 		Logformat(ERROR, "Error creating Discord session: %v", err)
 	}
@@ -36,13 +39,17 @@ func Setup(data EnvData) {
 				Name:        "help",
 				Description: "Show help menu",
 			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "update",
+				Description: "Update the media folder",
+			},
 		},
 	})
 	if err != nil {
 		Logformat(ERROR, "Cannot create slash command: %v", err)
 	}
-	Logformat(INFO, "Downloading %s, this may take some time...\n", data.MediaName)
-	filelist, err = downloadMedia(data.MediaURL, data.MediaName)
+	filelist, err = downloadMedia(bot_data.MediaURL, bot_data.MediaName)
 	if err != nil {
 		Logformat(ERROR, "%s\n", err.Error())
 	}
@@ -71,6 +78,7 @@ func Loop() {
 }
 
 func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	var err error
 	if i.ApplicationCommandData().Name == "advent" {
 		// Check which subcommand
 		options := i.ApplicationCommandData().Options
@@ -78,14 +86,35 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: "**Advent Help Menu**\n\n• `/advent help` — Show this help menu",
+					Content: "**Advent Help Menu**\n\n• `/advent help` — Show this help menu\n• `/advent update` — Update the media",
 				},
 			})
 		}
+		if len(options) > 0 && options[0].Name == "update" {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Updating media, please wait...",
+				},
+			})
+
+			filelist, err = downloadMedia(bot_data.MediaURL, bot_data.MediaName)
+			if err != nil {
+				s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+					Content: "Failed to update media ! :c",
+				})
+			} else {
+				s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+					Content: fmt.Sprintf("Updated media with **%d files** ! c:", len(filelist)),
+				})
+			}
+		}
+
 	}
 }
 
 func downloadMedia(url string, zipName string) ([]string, error) {
+	Logformat(INFO, "Downloading %s, this may take some time...\n", zipName)
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
