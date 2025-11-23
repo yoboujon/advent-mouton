@@ -232,6 +232,9 @@ func botLogic() {
 			if (timestamp.Day() == now.Day()) && (timestamp.Month() == now.Month()) && (timestamp.Year() == now.Year()) {
 				send = false
 			}
+			if now.Hour() < 8 || (now.Month() != time.December) {
+				send = false
+			}
 		}
 		if send {
 			fileName, err := getRandomFile(msg)
@@ -239,6 +242,7 @@ func botLogic() {
 				Logformat(WARNING, "Failed to send to server %s: %s", guildID, err.Error())
 			}
 			_, err = dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+				Content: env_data.Msg,
 				Files: []*discordgo.File{
 					{
 						Name:   fileName,
