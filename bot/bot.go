@@ -44,12 +44,21 @@ func Setup(data EnvData) {
 				Name:        "update",
 				Description: "Update the media folder",
 			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "setup",
+				Description: "Setup the channel to send media",
+			},
 		},
 	})
 	if err != nil {
 		Logformat(ERROR, "Cannot create slash command: %v", err)
 	}
 	filelist, err = downloadMedia(bot_data.MediaURL, bot_data.MediaName)
+	if err != nil {
+		Logformat(ERROR, "%s\n", err.Error())
+	}
+	err = loadGuildChannels()
 	if err != nil {
 		Logformat(ERROR, "%s\n", err.Error())
 	}
@@ -109,7 +118,15 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				})
 			}
 		}
-
+		if len(options) > 0 && options[0].Name == "setup" {
+			addGuildChannels(i.GuildID, i.ChannelID)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Selected channel to send media!",
+				},
+			})
+		}
 	}
 }
 
