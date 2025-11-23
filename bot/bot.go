@@ -219,6 +219,10 @@ func unzip(zipPath string) ([]string, error) {
 
 func botLogic() {
 	now := time.Now()
+	if (now.Hour() < 8) || (now.Month() != time.December) {
+		return
+	}
+
 	for guildID, channelID := range guildChannels {
 		msg, err := getBotMediaMessages(dg, channelID, dg.State.User.ID)
 		if err != nil {
@@ -230,9 +234,6 @@ func botLogic() {
 		for _, element := range msg {
 			timestamp := element.Timestamp
 			if (timestamp.Day() == now.Day()) && (timestamp.Month() == now.Month()) && (timestamp.Year() == now.Year()) {
-				send = false
-			}
-			if now.Hour() < 8 || (now.Month() != time.December) {
 				send = false
 			}
 		}
